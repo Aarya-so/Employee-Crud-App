@@ -95,7 +95,7 @@ Opens at `http://127.0.0.1:5173` and talks to the backend at
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
-## Notes for the mentor review
+## Notes 
 
 - Passwords are hashed with `pwdlib` (Argon2), never stored in plain text.
 - Tokens expire after 8 hours.
