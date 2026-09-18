@@ -1,6 +1,8 @@
 # test_connection.py
 import os
 from sqlalchemy import create_engine, text
+import logging
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",

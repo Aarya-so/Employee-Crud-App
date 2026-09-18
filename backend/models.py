@@ -2,7 +2,8 @@ import enum
 
 from sqlalchemy import Column, Integer, String, Enum, ForeignKey, Numeric
 from sqlalchemy.orm import relationship
-
+import logging
+logger = logging.getLogger(__name__)
 from backend.database import Base
 
 

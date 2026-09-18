@@ -1,3 +1,5 @@
+import logging
+from backend import logging_config
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -5,11 +7,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+
 from backend import auth, models, schemas
 from backend.database import SessionLocal, engine, Base, get_db
 
 app = FastAPI(title="Employee Management System")
-
+logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # CORS - allow the React dev server (and any origin while developing) to
 # call this API. Tighten allow_origins before deploying.
@@ -24,7 +27,6 @@ app.add_middleware(
 
 Base.metadata.create_all(bind=engine)
 
-
 # ---------------------------------------------------------------------------
 # Global error handling - turn raw exceptions into clean JSON responses
 # instead of leaking stack traces or returning bare {"message": ...} bodies.
@@ -36,11 +38,13 @@ async def validation_exception_handler(request, exc: RequestValidationError):
         {"field": ".".join(str(p) for p in e["loc"] if p != "body"), "message": e["msg"]}
         for e in exc.errors()
     ]
+    logger.warning(f"Validation error on {request.method} {request.url.path}: {errors}")
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
 @app.exception_handler(SQLAlchemyError)
 async def db_exception_handler(request, exc: SQLAlchemyError):
+    logger.error(f"Database error on {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=500,
         content={"detail": "A database error occurred. Please try again."},
@@ -49,17 +53,18 @@ async def db_exception_handler(request, exc: SQLAlchemyError):
 
 @app.get("/")
 def home():
+    logger.debug("Root endpoint hit")
     return {"message": "Employee Management System API"}
-
-
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
 
 @app.post("/signup", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    logger.info(f"Signup attempt: {user.email}")
     existing_user = db.query(models.User).filter(models.User.email == user.email).first()
     if existing_user:
+        logger.warning(f"Signup failed, email already registered: {user.email}")
         raise HTTPException(status_code=400, detail="Email already registered")
 
     new_user = models.User(
@@ -71,24 +76,28 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    logger.info(f"User signed up successfully: id={new_user.id}, email={new_user.email}")
     return new_user
 
 
 @app.post("/login", response_model=schemas.Token)
 def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
+    logger.info(f"Login attempt: {credentials.email}")
     user = db.query(models.User).filter(models.User.email == credentials.email).first()
 
     if not user or not auth.verify_password(credentials.password, user.password):
+        logger.warning(f"Login failed: {credentials.email}")
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access_token = auth.create_access_token(data={"sub": str(user.id), "role": user.role.value})
+    logger.info(f"Login successful: id={user.id}, role={user.role.value}")
     return schemas.Token(access_token=access_token, user=user)
 
 
 @app.get("/me", response_model=schemas.UserOut)
 def read_me(current_user: models.User = Depends(auth.get_current_user)):
+    logger.debug(f"User id={current_user.id} fetched their own profile")
     return current_user
-
 
 # ---------------------------------------------------------------------------
 # User management - super_admin only
@@ -137,7 +146,6 @@ def delete_user(
     db.commit()
     return {"message": "User deleted successfully"}
 
-
 # ---------------------------------------------------------------------------
 # Employees
 #   - super_admin & admin: full CRUD, can see every employee
@@ -173,7 +181,9 @@ def create_employee(
         auth.require_roles(models.UserRole.super_admin, models.UserRole.admin)
     ),
 ):
+    logger.info(f"Attempting to create employee: {employee.email}")
     if db.query(models.Employee).filter(models.Employee.email == employee.email).first():
+        logger.warning(f"Create failed, email already exists: {employee.email}")
         raise HTTPException(status_code=400, detail="An employee with this email already exists")
 
     new_employee = models.Employee(
@@ -187,6 +197,7 @@ def create_employee(
     db.add(new_employee)
     db.commit()
     db.refresh(new_employee)
+    logger.info(f"Employee created successfully: id={new_employee.id}")
     return new_employee
 
 
@@ -200,13 +211,16 @@ def get_employees(
         auth.require_roles(models.UserRole.super_admin, models.UserRole.admin)
     ),
 ):
+    logger.debug("Fetching all employees")
     try:
-        return db.query(models.Employee).all()
+        employees = db.query(models.Employee).all()
+        logger.info(f"Fetched {len(employees)} employees")
+        return employees
     except SQLAlchemyError as e:
-        print(f"Database error in get_employees: {e}")
+        logger.error(f"Database error in get_employees: {e}")
         raise HTTPException(status_code=500, detail="Database error occurred") from e
     except Exception as e:
-        print(f"Unexpected error in get_employees: {e}")
+        logger.error(f"Unexpected error in get_employees: {e}")
         raise HTTPException(status_code=500, detail="Something went wrong") from e
 
 
@@ -215,12 +229,15 @@ def get_my_employee_record(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.require_roles(models.UserRole.user)),
 ):
+    logger.debug(f"User id={current_user.id} fetching their own employee record")
     employee = db.query(models.Employee).filter(models.Employee.user_id == current_user.id).first()
     if employee is None:
+        logger.warning(f"No employee record linked to user id={current_user.id}")
         raise HTTPException(
             status_code=404,
             detail="No employee record is linked to your account yet. Ask an admin to link it.",
         )
+    logger.info(f"Employee record fetched for user id={current_user.id}: employee id={employee.id}")
     return employee
 
 
@@ -230,13 +247,19 @@ def get_employee(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
+    logger.debug(f"Fetching employee id={employee_id}, requested by user id={current_user.id}")
     employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if employee is None:
+        logger.warning(f"Employee not found: id={employee_id}")
         raise HTTPException(status_code=404, detail="Employee not found")
 
     if current_user.role == models.UserRole.user and employee.user_id != current_user.id:
+        logger.warning(
+            f"Access denied: user id={current_user.id} tried to view employee id={employee_id}"
+        )
         raise HTTPException(status_code=403, detail="You can only view your own employee record")
 
+    logger.info(f"Employee fetched: id={employee_id}")
     return employee
 
 
@@ -249,8 +272,10 @@ def update_employee(
         auth.require_roles(models.UserRole.super_admin, models.UserRole.admin)
     ),
 ):
+    logger.info(f"Attempting to update employee id={employee_id}")
     existing_employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if existing_employee is None:
+        logger.warning(f"Update failed, employee not found: id={employee_id}")
         raise HTTPException(status_code=404, detail="Employee not found")
 
     duplicate = (
@@ -259,6 +284,7 @@ def update_employee(
         .first()
     )
     if duplicate:
+        logger.warning(f"Update failed, duplicate email: {employee.email}")
         raise HTTPException(status_code=400, detail="Another employee already uses this email")
 
     existing_employee.name = employee.name
@@ -269,6 +295,7 @@ def update_employee(
 
     db.commit()
     db.refresh(existing_employee)
+    logger.info(f"Employee updated successfully: id={employee_id}")
     return existing_employee
 
 
@@ -280,10 +307,13 @@ def delete_employee(
         auth.require_roles(models.UserRole.super_admin, models.UserRole.admin)
     ),
 ):
+    logger.info(f"Attempting to delete employee id={employee_id}")
     employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
     if employee is None:
+        logger.warning(f"Delete failed, employee not found: id={employee_id}")
         raise HTTPException(status_code=404, detail="Employee not found")
 
     db.delete(employee)
     db.commit()
+    logger.info(f"Employee deleted successfully: id={employee_id}")
     return {"message": "Employee deleted successfully"}

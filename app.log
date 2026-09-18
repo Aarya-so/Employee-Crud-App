@@ -1,0 +1,10 @@
+2026-09-18 16:25:05,546 - backend.database - INFO - Connecting to database backend: mssql+pyodbc
+2026-09-18 16:25:05,608 - backend.database - INFO - Database engine created successfully
+2026-09-18 16:25:05,615 - backend.auth - WARNING - Using default dev SECRET_KEY — set a real SECRET_KEY before deploying
+2026-09-18 16:25:11,411 - backend.main - INFO - Login attempt: robintest@gmail.com
+2026-09-18 16:25:11,556 - backend.main - INFO - Login successful: id=2, role=super_admin
+2026-09-18 16:25:11,618 - backend.main - INFO - Fetched 2 employees
+2026-09-18 16:25:11,641 - backend.main - INFO - Fetched 2 employees
+2026-09-18 16:26:00,955 - backend.main - INFO - Attempting to create employee: xyzz@gmail.com
+2026-09-18 16:26:01,004 - backend.main - INFO - Employee created successfully: id=1002
+2026-09-18 16:26:01,015 - backend.main - INFO - Fetched 3 employees

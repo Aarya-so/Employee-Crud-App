@@ -1,7 +1,8 @@
 import re
 from decimal import Decimal
 from typing import Optional
-
+import logging
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from backend.models import UserRole
