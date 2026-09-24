@@ -8,3 +8,37 @@
 2026-09-18 16:26:00,955 - backend.main - INFO - Attempting to create employee: xyzz@gmail.com
 2026-09-18 16:26:01,004 - backend.main - INFO - Employee created successfully: id=1002
 2026-09-18 16:26:01,015 - backend.main - INFO - Fetched 3 employees
+2026-09-24 17:57:18,540 - backend.database - INFO - Connecting to database backend: mssql+pyodbc
+2026-09-24 17:57:18,603 - backend.database - INFO - Database engine created successfully
+2026-09-24 17:57:18,608 - backend.auth - WARNING - Using default dev SECRET_KEY — set a real SECRET_KEY before deploying
+2026-09-24 18:25:26,113 - backend.database - INFO - Connecting to database backend: mssql+pyodbc
+2026-09-24 18:25:26,150 - backend.database - INFO - Database engine created successfully
+2026-09-24 18:39:41,157 - backend.auth - WARNING - Invalid or expired token: Signature verification failed.
+2026-09-24 18:39:41,161 - backend.auth - WARNING - Invalid or expired token: Signature verification failed.
+2026-09-24 18:39:43,510 - backend.main - INFO - Login attempt: robintest@gmail.com
+2026-09-24 18:39:43,613 - backend.main - INFO - Login successful: id=2, role=super_admin
+2026-09-24 18:39:43,668 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:39:43,679 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:05,202 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:05,211 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:13,448 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:13,455 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:19,050 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:19,057 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:23,542 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:23,549 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:32,795 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:32,803 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:40:36,261 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:40:36,273 - backend.main - INFO - Fetched 3 employees
+2026-09-24 18:41:08,219 - backend.main - INFO - Attempting to create employee: zzz@gmail.com
+2026-09-24 18:41:08,265 - backend.main - INFO - Employee created successfully: id=2002
+2026-09-24 18:41:08,274 - backend.main - INFO - Fetched 4 employees
+2026-09-24 18:41:11,586 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:41:11,596 - backend.main - INFO - Super admin id=2 listed 3 users
+2026-09-24 18:41:12,254 - backend.main - INFO - Fetched 4 employees
+2026-09-24 18:41:12,260 - backend.main - INFO - Fetched 4 employees
+2026-09-24 18:41:19,674 - backend.main - INFO - Login attempt: sara@gmail.com
+2026-09-24 18:41:19,754 - backend.main - INFO - Login successful: id=1002, role=user
+2026-09-24 18:41:22,186 - backend.main - INFO - Employee record fetched for user id=1002: employee id=3
+2026-09-24 18:41:22,203 - backend.main - INFO - Employee record fetched for user id=1002: employee id=3

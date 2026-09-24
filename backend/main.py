@@ -4,7 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 
@@ -13,6 +13,14 @@ from backend.database import SessionLocal, engine, Base, get_db
 
 app = FastAPI(title="Employee Management System")
 logger = logging.getLogger(__name__)
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+
 # ---------------------------------------------------------------------------
 # CORS - allow the React dev server (and any origin while developing) to
 # call this API. Tighten allow_origins before deploying.
@@ -44,6 +52,8 @@ async def validation_exception_handler(request, exc: RequestValidationError):
 
 @app.exception_handler(SQLAlchemyError)
 async def db_exception_handler(request, exc: SQLAlchemyError):
+    # Safety net: routes below handle their own DB errors (with rollback),
+    # this catches anything that slips through (e.g. errors in read queries).
     logger.error(f"Database error on {request.method} {request.url.path}: {exc}")
     return JSONResponse(
         status_code=500,
@@ -55,6 +65,7 @@ async def db_exception_handler(request, exc: SQLAlchemyError):
 def home():
     logger.debug("Root endpoint hit")
     return {"message": "Employee Management System API"}
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -73,9 +84,20 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
         password=auth.hash_password(user.password),
         role=models.UserRole.user,
     )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except IntegrityError:
+        db.rollback()
+        logger.warning(f"Signup rolled back, duplicate email : {user.email}")
+        raise HTTPException(status_code=400, detail="Email already registered")
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Signup rolled back, database error for {user.email}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
     logger.info(f"User signed up successfully: id={new_user.id}, email={new_user.email}")
     return new_user
 
@@ -106,9 +128,11 @@ def read_me(current_user: models.User = Depends(auth.get_current_user)):
 @app.get("/users", response_model=list[schemas.UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    _current_user: models.User = Depends(auth.require_roles(models.UserRole.super_admin)),
+    current_user: models.User = Depends(auth.require_roles(models.UserRole.super_admin)),
 ):
-    return db.query(models.User).all()
+    users = db.query(models.User).all()
+    logger.info(f"Super admin id={current_user.id} listed {len(users)} users")
+    return users
 
 
 @app.patch("/users/{user_id}/role", response_model=schemas.UserOut)
@@ -118,15 +142,26 @@ def update_user_role(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.require_roles(models.UserRole.super_admin)),
 ):
+    logger.info(f"Super admin id={current_user.id} attempting to change role of user id={user_id}")
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     if target_user is None:
+        logger.warning(f"Role change failed, user not found: id={user_id}")
         raise HTTPException(status_code=404, detail="User not found")
     if target_user.id == current_user.id:
+        logger.warning(f"Role change blocked, user id={current_user.id} tried to change own role")
         raise HTTPException(status_code=400, detail="You cannot change your own role")
 
-    target_user.role = payload.role
-    db.commit()
-    db.refresh(target_user)
+    old_role = target_user.role.value
+    try:
+        target_user.role = payload.role
+        db.commit()
+        db.refresh(target_user)
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Role change rolled back, database error for user id={user_id}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
+    logger.info(f"User id={user_id} role changed: {old_role} -> {target_user.role.value}")
     return target_user
 
 
@@ -136,14 +171,24 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.require_roles(models.UserRole.super_admin)),
 ):
+    logger.info(f"Super admin id={current_user.id} attempting to delete user id={user_id}")
     target_user = db.query(models.User).filter(models.User.id == user_id).first()
     if target_user is None:
+        logger.warning(f"Delete failed, user not found: id={user_id}")
         raise HTTPException(status_code=404, detail="User not found")
     if target_user.id == current_user.id:
+        logger.warning(f"Delete blocked, user id={current_user.id} tried to delete own account")
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
 
-    db.delete(target_user)
-    db.commit()
+    try:
+        db.delete(target_user)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"User delete rolled back, database error for user id={user_id}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
+    logger.info(f"User deleted successfully: id={user_id}")
     return {"message": "User deleted successfully"}
 
 # ---------------------------------------------------------------------------
@@ -158,6 +203,7 @@ def _apply_user_link(employee: models.Employee, user_email: str | None, db: Sess
         return
     linked_user = db.query(models.User).filter(models.User.email == user_email).first()
     if linked_user is None:
+        logger.warning(f"User link failed, no account for {user_email}")
         raise HTTPException(status_code=404, detail=f"No user account found for {user_email}")
     already_linked = (
         db.query(models.Employee)
@@ -165,6 +211,7 @@ def _apply_user_link(employee: models.Employee, user_email: str | None, db: Sess
         .first()
     )
     if already_linked:
+        logger.warning(f"User link failed, user id={linked_user.id} already linked to an employee")
         raise HTTPException(status_code=400, detail="That user is already linked to another employee record")
     employee.user_id = linked_user.id
 
@@ -192,17 +239,28 @@ def create_employee(
         department=employee.department,
         salary=employee.salary,
     )
+    # Validation/lookup step: raises HTTPException before anything is written.
     _apply_user_link(new_employee, employee.user_email, db)
 
-    db.add(new_employee)
-    db.commit()
-    db.refresh(new_employee)
+    try:
+        db.add(new_employee)
+        db.commit()
+        db.refresh(new_employee)
+    except IntegrityError:
+        db.rollback()
+        logger.warning(f"Create rolled back, integrity error for {employee.email}")
+        raise HTTPException(
+            status_code=400,
+            detail="Employee could not be saved: email or linked user already in use",
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Create rolled back, database error for {employee.email}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
     logger.info(f"Employee created successfully: id={new_employee.id}")
     return new_employee
 
-
-from fastapi import HTTPException
-from sqlalchemy.exc import SQLAlchemyError
 
 @app.get("/employees", response_model=list[schemas.EmployeeOut])
 def get_employees(
@@ -287,14 +345,28 @@ def update_employee(
         logger.warning(f"Update failed, duplicate email: {employee.email}")
         raise HTTPException(status_code=400, detail="Another employee already uses this email")
 
-    existing_employee.name = employee.name
-    existing_employee.email = employee.email
-    existing_employee.department = employee.department
-    existing_employee.salary = employee.salary
+    # Validation/lookup step first, so a failure leaves the record untouched.
     _apply_user_link(existing_employee, employee.user_email, db)
 
-    db.commit()
-    db.refresh(existing_employee)
+    try:
+        existing_employee.name = employee.name
+        existing_employee.email = employee.email
+        existing_employee.department = employee.department
+        existing_employee.salary = employee.salary
+        db.commit()
+        db.refresh(existing_employee)
+    except IntegrityError:
+        db.rollback()
+        logger.warning(f"Update rolled back, integrity error for employee id={employee_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Employee could not be updated: email or linked user already in use",
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Update rolled back, database error for employee id={employee_id}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
     logger.info(f"Employee updated successfully: id={employee_id}")
     return existing_employee
 
@@ -313,7 +385,13 @@ def delete_employee(
         logger.warning(f"Delete failed, employee not found: id={employee_id}")
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    db.delete(employee)
-    db.commit()
+    try:
+        db.delete(employee)
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(f"Delete rolled back, database error for employee id={employee_id}")
+        raise HTTPException(status_code=500, detail="Database error occurred")
+
     logger.info(f"Employee deleted successfully: id={employee_id}")
     return {"message": "Employee deleted successfully"}
